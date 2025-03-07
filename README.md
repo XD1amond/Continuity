@@ -9,6 +9,7 @@ Continuity is a lightweight framework that enables AI systems to actively manage
 - **Knowledge Management**: Hierarchical organization of preserved information with automatic detection of related information
 - **Clean Integration API**: Simple API for host application integration with event hooks and methods for knowledge retrieval
 - **Vector Database Integration**: Semantic search for finding related information based on meaning, not just exact matches
+- **RAGs Integration**: Retrieval-Augmented Generation support for enhancing AI responses with relevant information
 
 ## Installation
 
@@ -79,6 +80,32 @@ console.log(summaries);
 </query_summary>
 ```
 
+### Save User Data (RAGs)
+
+```xml
+<save_user_data>
+  <key>user_preference</key>
+  <value>The user prefers dark mode and minimalist design</value>
+</save_user_data>
+```
+
+### Retrieve User Data (RAGs)
+
+```xml
+<retrieve_user_data>
+  <key>user_preference</key>
+</retrieve_user_data>
+```
+
+Or retrieve by semantic search:
+
+```xml
+<retrieve_user_data>
+  <query>What are the user's design preferences?</query>
+  <limit>3</limit>
+</retrieve_user_data>
+```
+
 ## API Reference
 
 ### ContinuityAPI
@@ -94,6 +121,13 @@ new ContinuityAPI(options?: ContinuityOptions)
 Options:
 - `storage`: Storage configuration options
 - `context`: Context manager configuration options
+- `rags`: RAGs configuration options
+  - `enabled`: Enable RAGs functionality (default: false)
+  - `openAiApiKey`: OpenAI API key for embeddings (optional)
+  - `embeddingModel`: Embedding model to use (default: 'text-embedding-ada-002')
+  - `useLocalEmbeddings`: Use local embeddings instead of OpenAI (default: true)
+  - `maxResults`: Maximum number of results to return (default: 5)
+  - `similarityThreshold`: Minimum similarity threshold (default: 0.5)
 - `defaultChatId`: Default chat ID to use if none is provided
 
 #### Methods
@@ -325,6 +359,48 @@ const importedSummaries = await continuity.importSimilarSummaries(
 ```
 
 This is particularly useful when users reach context limits in conversations, as it allows retrieving relevant information from previous chats based on semantic similarity rather than requiring exact matches.
+
+### RAGs Integration for Enhanced AI Responses
+
+The framework includes support for Retrieval-Augmented Generation (RAGs), allowing AI systems to save and retrieve user data to enhance responses with relevant information.
+
+```typescript
+// Create a Continuity API instance with RAGs enabled
+const continuity = new ContinuityAPI({
+  rags: {
+    enabled: true,
+    openAiApiKey: 'your-openai-api-key', // Optional, for better embeddings
+    maxResults: 5,
+    similarityThreshold: 0.5
+  }
+});
+
+// Process AI response with save_user_data command
+await continuity.processResponse(`
+<save_user_data>
+  <key>favorite_color</key>
+  <value>blue</value>
+</save_user_data>
+I'll remember your favorite color is blue.
+`, 'chat-123');
+
+// Later, retrieve user data by key
+const result = await continuity.processResponse(`
+<retrieve_user_data>
+  <key>favorite_color</key>
+</retrieve_user_data>
+`, 'chat-123');
+
+// Or retrieve semantically similar user data
+const result = await continuity.processResponse(`
+<retrieve_user_data>
+  <query>What are the user's preferences?</query>
+  <limit>3</limit>
+</retrieve_user_data>
+`, 'chat-123');
+```
+
+This enables AI systems to maintain a persistent memory of user information and preferences, which can be retrieved contextually to provide more personalized and relevant responses.
 
 ## License
 

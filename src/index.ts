@@ -34,3 +34,14 @@ export {
   VectorSearchResult,
   textToVector
 } from './vector';
+
+// Export RAGs functionality
+export {
+  RagsManager,
+  rags,
+  EmbeddingProvider,
+  DefaultEmbeddingProvider,
+  OpenAIEmbeddingProvider,
+  RagsRetrievalOptions,
+  RagsRetrievalResult
+} from './rags';

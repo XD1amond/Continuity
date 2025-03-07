@@ -8,12 +8,22 @@ import {
   CommandType,
   SummaryEntry,
   ContinuityOptions,
-  QueryOptions
+  QueryOptions,
+  RagsOptions
 } from './types';
 import { XmlParser, parser } from './parser';
 import { StorageManager, storage } from './storage';
 import { ContextManager, context } from './context';
 import { VectorDatabase, vectorDb, TextVector, VectorSearchResult } from './vector';
+import {
+  RagsManager,
+  rags,
+  EmbeddingProvider,
+  DefaultEmbeddingProvider,
+  OpenAIEmbeddingProvider,
+  RagsRetrievalOptions,
+  RagsRetrievalResult
+} from './rags';
 
 /**
  * Event types emitted by the Continuity API
@@ -40,6 +50,7 @@ export class ContinuityAPI {
   private storage: StorageManager;
   private context: ContextManager;
   private vectorDb: VectorDatabase;
+  private ragsManager: RagsManager;
   private options: Required<ContinuityOptions>;
   private eventListeners: EventListener[] = [];
   
@@ -49,6 +60,12 @@ export class ContinuityAPI {
   private static readonly DEFAULT_OPTIONS: Required<ContinuityOptions> = {
     storage: {},
     context: {},
+    rags: {
+      enabled: false,
+      useLocalEmbeddings: true,
+      maxResults: 5,
+      similarityThreshold: 0.5
+    },
     defaultChatId: 'default'
   };
   
@@ -60,13 +77,30 @@ export class ContinuityAPI {
       ...ContinuityAPI.DEFAULT_OPTIONS,
       ...options,
       storage: { ...ContinuityAPI.DEFAULT_OPTIONS.storage, ...options.storage },
-      context: { ...ContinuityAPI.DEFAULT_OPTIONS.context, ...options.context }
+      context: { ...ContinuityAPI.DEFAULT_OPTIONS.context, ...options.context },
+      rags: { ...ContinuityAPI.DEFAULT_OPTIONS.rags, ...options.rags }
     };
     
     this.parser = parser;
     this.storage = storage;
     this.context = context;
     this.vectorDb = vectorDb;
+    
+    // Initialize RAGs manager
+    this.ragsManager = rags;
+    
+    // Configure embedding provider if OpenAI API key is provided
+    if (this.options.rags.enabled) {
+      if (this.options.rags.openAiApiKey) {
+        const openAiProvider = new OpenAIEmbeddingProvider(
+          this.options.rags.openAiApiKey,
+          this.options.rags.embeddingModel
+        );
+        this.ragsManager.setEmbeddingProvider(openAiProvider);
+      } else if (!this.options.rags.useLocalEmbeddings) {
+        console.warn('OpenAI API key not provided but useLocalEmbeddings is false. Falling back to local embeddings.');
+      }
+    }
   }
   
   /**
@@ -144,6 +178,12 @@ export class ContinuityAPI {
         
       case CommandType.QUERY_SUMMARY:
         return this.handleQuerySummary(command, chatId);
+        
+      case CommandType.SAVE_USER_DATA:
+        return this.handleSaveUserData(command, chatId);
+        
+      case CommandType.RETRIEVE_USER_DATA:
+        return this.handleRetrieveUserData(command, chatId);
         
       default:
         throw new Error(`Unknown command type: ${command.type}`);
@@ -245,6 +285,132 @@ export class ContinuityAPI {
     }
     
     return this.storage.querySummaries(chatId, queryOptions);
+  }
+  
+  /**
+   * Handle save_user_data command
+   * Saves user data as a summary entry with special category
+   */
+  private async handleSaveUserData(command: Command, chatId: string): Promise<SummaryEntry> {
+    const { key, value } = command.params;
+    
+    if (!key) {
+      throw new Error('Key is required for save_user_data command');
+    }
+    
+    if (value === undefined) {
+      throw new Error('Value is required for save_user_data command');
+    }
+    
+    // Create a summary entry with the user data
+    // Use 'user_data' as the category and the key as a subcategory
+    const entry = await this.storage.createSummary(
+      chatId,
+      value,
+      `user_data.${key}`,
+      'medium'
+    );
+    
+    // If RAGs is enabled, add to RAGs index
+    if (this.options.rags.enabled) {
+      await this.ragsManager.addEntry(entry);
+    } else {
+      // Otherwise just add to vector database
+      this.vectorDb.addSummaryEntry(entry);
+    }
+    
+    this.emitEvent(EventType.SUMMARY_ADDED, { entry });
+    
+    return entry;
+  }
+  
+  /**
+   * Handle retrieve_user_data command
+   * Retrieves user data using either direct key lookup or RAGs
+   */
+  private async handleRetrieveUserData(command: Command, chatId: string): Promise<any> {
+    const { key, query, limit } = command.params;
+    const effectiveChatId = chatId || this.options.defaultChatId;
+    
+    // If key is provided, do a direct lookup
+    if (key) {
+      const queryOptions: QueryOptions = {
+        category: `user_data.${key}`
+      };
+      
+      const entries = await this.storage.querySummaries(effectiveChatId, queryOptions);
+      
+      if (entries.length > 0) {
+        // Return the most recently created entry
+        entries.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        return {
+          key,
+          value: entries[0].context,
+          entry: entries[0]
+        };
+      }
+      
+      return { key, value: null };
+    }
+    
+    // If query is provided, use RAGs to find relevant data
+    if (query) {
+      const effectiveLimit = limit || this.options.rags.maxResults || 5;
+      
+      if (this.options.rags.enabled) {
+        // Use RAGs manager for retrieval
+        const retrievalOptions: RagsRetrievalOptions = {
+          chatId: effectiveChatId,
+          limit: effectiveLimit,
+          threshold: this.options.rags.similarityThreshold,
+          filter: (entry) => !!entry.category && entry.category.startsWith('user_data.')
+        };
+        
+        const results = await this.ragsManager.retrieve(query, retrievalOptions);
+        
+        return {
+          query,
+          results: results.map(result => ({
+            key: result.entry.category?.replace('user_data.', ''),
+            value: result.entry.context,
+            score: result.score,
+            entry: result.entry
+          }))
+        };
+      } else {
+        // Fall back to vector database if RAGs is not enabled
+        const results = this.vectorDb.searchWithFilter(
+          query,
+          metadata => metadata.chatId === effectiveChatId && !!metadata.category && metadata.category.startsWith('user_data.'),
+          effectiveLimit,
+          this.options.rags.similarityThreshold
+        );
+        
+        // Convert results to user data format
+        const userData = [];
+        
+        for (const result of results) {
+          const summaryId = result.vector.metadata.summaryId;
+          const entry = await this.storage.getSummary(summaryId);
+          
+          if (entry) {
+            userData.push({
+              key: entry.category?.replace('user_data.', ''),
+              value: entry.context,
+              score: result.score,
+              entry
+            });
+          }
+        }
+        
+        return {
+          query,
+          results: userData
+        };
+      }
+    }
+    
+    throw new Error('Either key or query is required for retrieve_user_data command');
   }
   
   /**

@@ -50,7 +50,9 @@ export enum CommandType {
   ADD_SUMMARY = 'add_summary',
   EDIT_SUMMARY = 'edit_summary',
   DELETE_SUMMARY = 'delete_summary',
-  QUERY_SUMMARY = 'query_summary'
+  QUERY_SUMMARY = 'query_summary',
+  SAVE_USER_DATA = 'save_user_data',
+  RETRIEVE_USER_DATA = 'retrieve_user_data'
 }
 
 /**
@@ -76,6 +78,18 @@ export interface Command {
     
     /** ID for edit/delete operations */
     id?: string;
+    
+    /** Key for user data operations */
+    key?: string;
+    
+    /** Value for user data operations */
+    value?: string;
+    
+    /** Query for retrieval operations */
+    query?: string;
+    
+    /** Limit for retrieval operations */
+    limit?: number;
   };
 }
 
@@ -105,6 +119,29 @@ export interface ContextOptions {
 }
 
 /**
+ * RAGs (Retrieval-Augmented Generation) options
+ */
+export interface RagsOptions {
+  /** Enable RAGs functionality */
+  enabled?: boolean;
+  
+  /** OpenAI API key for embeddings (if using OpenAI embeddings) */
+  openAiApiKey?: string;
+  
+  /** Embedding model to use (defaults to 'text-embedding-ada-002' for OpenAI) */
+  embeddingModel?: string;
+  
+  /** Use local embeddings instead of OpenAI (less accurate but no API key needed) */
+  useLocalEmbeddings?: boolean;
+  
+  /** Maximum number of results to return in RAGs queries */
+  maxResults?: number;
+  
+  /** Minimum similarity threshold for RAGs queries (0-1) */
+  similarityThreshold?: number;
+}
+
+/**
  * Configuration options for the Continuity framework
  */
 export interface ContinuityOptions {
@@ -113,6 +150,9 @@ export interface ContinuityOptions {
   
   /** Context manager configuration */
   context?: ContextOptions;
+  
+  /** RAGs configuration */
+  rags?: RagsOptions;
   
   /** Default chat ID to use if none is provided */
   defaultChatId?: string;

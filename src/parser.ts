@@ -18,7 +18,7 @@ export class XmlParser {
     const commands: Command[] = [];
     
     // Match all supported command tags
-    const commandRegex = /<(add_summary|edit_summary|delete_summary|query_summary)>([\s\S]*?)<\/\1>/g;
+    const commandRegex = /<(add_summary|edit_summary|delete_summary|query_summary|save_user_data|retrieve_user_data)>([\s\S]*?)<\/\1>/g;
     let match;
     
     while ((match = commandRegex.exec(text)) !== null) {
@@ -40,6 +40,12 @@ export class XmlParser {
         case 'query_summary':
           commandType = CommandType.QUERY_SUMMARY;
           break;
+        case 'save_user_data':
+          commandType = CommandType.SAVE_USER_DATA;
+          break;
+        case 'retrieve_user_data':
+          commandType = CommandType.RETRIEVE_USER_DATA;
+          break;
         default:
           continue; // Skip unknown command types
       }
@@ -58,7 +64,7 @@ export class XmlParser {
   
   /**
    * Parse command parameters from the command content
-   * 
+   *
    * @param content - The content inside the command tags
    * @returns Parsed parameters
    */
@@ -98,6 +104,30 @@ export class XmlParser {
       params.id = idMatch[1].trim();
     }
     
+    // Parse key (for user data operations)
+    const keyMatch = /<key>(.*?)<\/key>/i.exec(content);
+    if (keyMatch) {
+      params.key = keyMatch[1].trim();
+    }
+    
+    // Parse value (for user data operations)
+    const valueMatch = /<value>([\s\S]*?)<\/value>/i.exec(content);
+    if (valueMatch) {
+      params.value = valueMatch[1].trim();
+    }
+    
+    // Parse query (for retrieval operations)
+    const queryMatch = /<query>([\s\S]*?)<\/query>/i.exec(content);
+    if (queryMatch) {
+      params.query = queryMatch[1].trim();
+    }
+    
+    // Parse limit (for retrieval operations)
+    const limitMatch = /<limit>(\d+)<\/limit>/i.exec(content);
+    if (limitMatch) {
+      params.limit = parseInt(limitMatch[1].trim(), 10);
+    }
+    
     return params;
   }
   
@@ -116,8 +146,8 @@ export class XmlParser {
       case CommandType.EDIT_SUMMARY:
         // Edit summary requires ID and at least one parameter to update
         return !!command.params.id && (
-          !!command.params.context || 
-          !!command.params.category || 
+          !!command.params.context ||
+          !!command.params.category ||
           !!command.params.priority
         );
         
@@ -128,6 +158,14 @@ export class XmlParser {
       case CommandType.QUERY_SUMMARY:
         // Query summary is always valid, even without parameters
         return true;
+        
+      case CommandType.SAVE_USER_DATA:
+        // Save user data requires key and value
+        return !!command.params.key && command.params.value !== undefined;
+        
+      case CommandType.RETRIEVE_USER_DATA:
+        // Retrieve user data requires either key or query
+        return !!command.params.key || !!command.params.query;
         
       default:
         return false;
@@ -141,7 +179,7 @@ export class XmlParser {
    * @returns Text with XML commands removed
    */
   public removeCommands(text: string): string {
-    return text.replace(/<(add_summary|edit_summary|delete_summary|query_summary)>[\s\S]*?<\/\1>/g, '');
+    return text.replace(/<(add_summary|edit_summary|delete_summary|query_summary|save_user_data|retrieve_user_data)>[\s\S]*?<\/\1>/g, '');
   }
 }
 
